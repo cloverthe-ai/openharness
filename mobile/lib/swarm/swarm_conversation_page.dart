@@ -12,6 +12,7 @@ import 'package:harness_mobile/phone/tty_controls.dart';
 import 'package:harness_mobile/shared/theme/app_theme.dart';
 
 import 'model.dart';
+import 'swarm_attachment.dart';
 import 'swarm_choices.dart';
 import 'swarm_conversation.dart';
 import 'swarm_inbox.dart';
@@ -1106,7 +1107,11 @@ class _Message extends StatelessWidget {
               ),
             ),
           for (final file in message.attachments)
-            _File(file: file, link: swarmAttachmentLink(file.url)),
+            SwarmAttachment(
+              file: file,
+              link: swarmAttachmentLink(file.url),
+              chip: _File(file: file, link: swarmAttachmentLink(file.url)),
+            ),
           if (actions)
             Padding(
               padding: const EdgeInsets.only(top: 8),
