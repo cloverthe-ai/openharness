@@ -121,6 +121,12 @@ class SuperTabConversation {
           ? SuperTabTask.fromJson(superTabMap(row['task']))
           : null,
       lastMessageSequence = (row['lastMessageSequence'] as num?)?.toInt() ?? 0,
+      recentPeople = Map.unmodifiable({
+        for (final MapEntry(:key, :value) in superTabMap(
+          row['recentPeople'] ?? const {},
+        ).entries)
+          if (value case final String text) key: ?DateTime.tryParse(text),
+      }),
       assignment = row['assignment'] == null
           ? null
           : Map.unmodifiable(superTabMap(row['assignment']));
@@ -147,6 +153,9 @@ class SuperTabConversation {
   /// Persisted links may be absent on older backends; loaded messages still supply links.
   final List<String> pullRequestUrls;
   final int lastMessageSequence;
+
+  /// The people who posted here lately, by person id to when; empty from a backend before the office map.
+  final Map<String, DateTime> recentPeople;
   final Map<String, dynamic>? assignment;
 }
 
@@ -230,7 +239,13 @@ class SuperTabSnapshot {
       }),
       localModels = SuperTabLocalModels.read(row['localModels']),
       mentionsWaiting = (row['mentionsWaiting'] as num?)?.toInt() ?? 0,
-      decisionsWaiting = (row['decisionsWaiting'] as num?)?.toInt() ?? 0 {
+      decisionsWaiting = (row['decisionsWaiting'] as num?)?.toInt() ?? 0,
+      kudosReceived = Map.unmodifiable({
+        for (final MapEntry(:key, :value) in superTabMap(
+          row['kudosReceived'] ?? const {},
+        ).entries)
+          if (value is num) key: value.toInt(),
+      }) {
     if (row['version'] != 1) {
       throw const FormatException('Update Harness to open this Swarm.');
     }
@@ -279,6 +294,12 @@ class SuperTabSnapshot {
   /// Decisions asked of the reader and not yet answered, Swarm-wide; 0 from a
   /// backend before decisions (backend superTabs/decisions.ts).
   final int decisionsWaiting;
+
+  /// Thanks each member received in the conversations this reader reads, by `person:<id>` or `agent:<id>`: a fun stat,
+  /// never points (backend kudos.ts).
+  final Map<String, int> kudosReceived;
+  int kudosFor({String? person, String? agent}) =>
+      kudosReceived[person != null ? 'person:$person' : 'agent:$agent'] ?? 0;
   SuperTabConversation? conversation(String id) =>
       conversations.where((c) => c.id == id).firstOrNull;
   SuperTabAgent? agent(String id) =>
@@ -672,6 +693,25 @@ class SuperTabDelivery {
   };
 }
 
+/// One member's thanks to the author of a message, with an optional one-line note.
+class SuperTabKudos {
+  SuperTabKudos.fromJson(Map<String, dynamic> row)
+    : from = Map.unmodifiable(superTabMap(row['from'])),
+      note = row['note'] as String?,
+      createdAt = DateTime.tryParse(row['createdAt'] as String? ?? '');
+  final Map<String, dynamic> from;
+  final String? note;
+  final DateTime? createdAt;
+  String get fromId => from['id'] as String? ?? '';
+  bool get fromAgent => from['kind'] == 'agent';
+
+  /// As it was when given; views with a roster may name the giver from it instead.
+  String get fromName => fromAgent
+      ? from['displayName'] as String? ?? from['name'] as String? ?? 'Agent'
+      // A person by their address's first part, as identity.dart names them.
+      : (from['name'] as String? ?? '').split('@').first;
+}
+
 class SuperTabMessage {
   SuperTabMessage.fromJson(Map<String, dynamic> row)
     : id = _text(row, 'id'),
@@ -686,6 +726,7 @@ class SuperTabMessage {
       mentions = List.unmodifiable(
         (row['mentions'] as List?)?.whereType<String>() ?? const <String>[],
       ),
+      kudos = _list(row['kudos'] ?? const [], SuperTabKudos.fromJson),
       deliveries = _list(
         row['deliveries'] ?? const [],
         (d) => Map<String, dynamic>.unmodifiable(d),
@@ -700,6 +741,9 @@ class SuperTabMessage {
 
   /// The people a Lead tagged in this message, by person id.
   final List<String> mentions;
+
+  /// The thanks given on this message, oldest first; empty from a backend before kudos.
+  final List<SuperTabKudos> kudos;
   final List<Map<String, dynamic>> deliveries;
   // Preserve the recorded identity for history and for removed agents. Views
   // with a current roster resolve the visible name through Snapshot.authorName.

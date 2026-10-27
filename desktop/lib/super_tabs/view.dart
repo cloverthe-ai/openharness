@@ -27,6 +27,7 @@ import 'message_receipt.dart';
 import 'notifications.dart';
 import 'decisions.dart';
 import 'decisions_view.dart';
+import 'office_view.dart';
 import 'route_row.dart';
 import 'terminal_row.dart';
 import 'work_details.dart';
@@ -89,6 +90,7 @@ class _SuperTabViewState extends State<SuperTabView>
   bool _showPullRequests = false;
 
   bool _showNotifications = false;
+  bool _showOffice = false;
   // The message a tag opened, scrolled to once it is laid out.
   String? _target;
   final _targetKey = GlobalKey();
@@ -299,7 +301,8 @@ class _SuperTabViewState extends State<SuperTabView>
         _devicesVisible ||
         _terminalsVisible ||
         _showPullRequests ||
-        _showNotifications) {
+        _showNotifications ||
+        _showOffice) {
       return false;
     }
     final lifecycle = WidgetsBinding.instance.lifecycleState;
@@ -897,6 +900,7 @@ class _SuperTabViewState extends State<SuperTabView>
       _closeSidebar();
       setState(() {
         _showNotifications = true;
+        _showOffice = false;
         _showPullRequests = false;
       });
       widget.onCloseTerminal?.call();
@@ -906,6 +910,7 @@ class _SuperTabViewState extends State<SuperTabView>
       setState(() {
         _showPullRequests = false;
         _showNotifications = false;
+        _showOffice = false;
       });
       (widget.onChooseAgentTerminal ?? widget.onOpenTerminal)(agent);
     },
@@ -913,12 +918,12 @@ class _SuperTabViewState extends State<SuperTabView>
         ? null
         : () {
             _closeSidebar();
-            setState(() => _showNotifications = false);
+            setState(() => _showNotifications = _showOffice = false);
             widget.app!.openDevices();
           },
     needsHuman: (group) => _needsHuman(group).length,
     onSelect: (id) {
-      setState(() => _showNotifications = false);
+      setState(() => _showNotifications = _showOffice = false);
       c.select(id);
       _closeSidebar();
     },
@@ -939,6 +944,55 @@ class _SuperTabViewState extends State<SuperTabView>
 
   bool get _notificationsVisible =>
       _showNotifications && !_devicesVisible && !c.accessRevoked;
+
+  /// Thanks [message]'s author, with an optional one-line note (backend kudos.ts).
+  Future<void> _thank(SuperTabMessage message) async {
+    var note = '';
+    final send = await showAppDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Thank ${_shownAuthor(c, message)}'),
+        content: SizedBox(
+          width: 360,
+          child: TextField(
+            key: const ValueKey('super-thank-note'),
+            autofocus: true,
+            maxLength: 120,
+            decoration: const InputDecoration(
+              hintText: 'Add a note (optional)',
+            ),
+            onChanged: (value) => note = value,
+            onSubmitted: (_) => Navigator.pop(context, true),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Send thanks'),
+          ),
+        ],
+      ),
+    );
+    if (send != true || !mounted) return;
+    final error = await c.giveKudos(message, note);
+    if (error != null && mounted) {
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(error)));
+    }
+  }
+
+  bool get _officeVisible =>
+      _showOffice && !_devicesVisible && !c.accessRevoked;
+
+  /// Leaves the office map for the conversation at the table clicked.
+  void _openTable(String id) {
+    setState(() => _showOffice = false);
+    c.select(id);
+  }
 
   /// Opens the conversation a tag is in, at its message, replying to it. Older
   /// pages are read first, until the message is among them; one that is not
@@ -1194,6 +1248,8 @@ class _SuperTabViewState extends State<SuperTabView>
         ? 'Your devices'
         : _notificationsVisible
         ? 'Notifications'
+        : _officeVisible
+        ? 'Office'
         : group == null
         ? c.snapshot?.projects.isEmpty == true
               ? c.snapshot!.name
@@ -1356,13 +1412,18 @@ class _SuperTabViewState extends State<SuperTabView>
                   )
                 else
                   _title(group),
-                if (!_devicesVisible && !_notificationsVisible)
+                if (!_devicesVisible &&
+                    !_notificationsVisible &&
+                    !_officeVisible)
                   ?_subtitle(group),
               ],
             ),
           ),
         ),
-        if (group != null && !_devicesVisible && !_notificationsVisible) ...[
+        if (group != null &&
+            !_devicesVisible &&
+            !_notificationsVisible &&
+            !_officeVisible) ...[
           fingerTarget(
             enabled: _phone,
             AppIconButton(
@@ -1419,6 +1480,25 @@ class _SuperTabViewState extends State<SuperTabView>
               _options(group, views: _menuNamesViews),
             ),
         ],
+        if (c.snapshot?.projects.isNotEmpty == true && !_devicesVisible)
+          fingerTarget(
+            enabled: _phone,
+            AppIconButton(
+              key: const ValueKey('super-office-open'),
+              icon: AppIcons.house,
+              size: AppIcons.inlineSize,
+              tooltip: 'Office',
+              selected: _officeVisible,
+              onPressed: () {
+                widget.onCloseTerminal?.call();
+                setState(() {
+                  _showOffice = !_showOffice;
+                  _showNotifications = false;
+                  _showPullRequests = false;
+                });
+              },
+            ),
+          ),
         if (!showRoster)
           fingerTarget(
             enabled: _phone,
@@ -1610,6 +1690,13 @@ class _SuperTabViewState extends State<SuperTabView>
               setState(() => _replies[c.selectedId] = message);
               _focus.requestFocus();
             }
+          : null,
+      onThank:
+          c.canWrite &&
+              c.selected?.archived == false &&
+              !(message.author['kind'] == 'person' &&
+                  message.authorId == c.accountId)
+          ? () => unawaited(_thank(message))
           : null,
       onReturnToComposer: _focus.requestFocus,
       receipts: [
@@ -2417,6 +2504,8 @@ class _SuperTabViewState extends State<SuperTabView>
                     child: IndexedStack(
                       index: _devicesVisible
                           ? 1
+                          : _officeVisible
+                          ? 4
                           : _notificationsVisible
                           ? 3
                           : c.snapshot?.projects.isEmpty == true
@@ -2444,6 +2533,13 @@ class _SuperTabViewState extends State<SuperTabView>
                                 leading: SuperTabDecisionList(
                                   decisions: SuperTabDecisions.of(c),
                                 ),
+                              )
+                            : const SizedBox.shrink(),
+                        _officeVisible
+                            ? SuperTabOfficeView(
+                                controller: c,
+                                app: widget.app,
+                                onOpen: _openTable,
                               )
                             : const SizedBox.shrink(),
                       ],

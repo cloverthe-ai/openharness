@@ -32,6 +32,8 @@ export interface ReadExtras {
   mentionsWaiting?: number
   /** A person's open decisions (decisions.ts). */
   decisionsWaiting?: number
+  /** Kudos each member received in conversations the reader reads (kudos.ts). */
+  kudosReceived?: Record<string, number>
 }
 
 const HEAD_FIELDS = ['version', 'id', 'name', 'project', 'projects', 'leadsConversationId', 'ownerId', 'environment',
@@ -101,5 +103,6 @@ function derive(state: SuperTabState, visible: SuperTabState, actor: Actor, now:
     ...(visible.otherProjectsWork ? { otherProjectsWork: visible.otherProjectsWork } : {}),
     ...(actor.kind === 'person' && extras.mentionsWaiting !== undefined ? { mentionsWaiting: extras.mentionsWaiting } : {}),
     ...(actor.kind === 'person' && extras.decisionsWaiting !== undefined ? { decisionsWaiting: extras.decisionsWaiting } : {}),
+    ...(extras.kudosReceived ? { kudosReceived: extras.kudosReceived } : {}),
   }
 }
